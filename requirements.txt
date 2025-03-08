@@ -1,6 +1,6 @@
 streamlit
 yfinance
-ta-lib
 numpy
 pandas
 nsepython
+ta-lib
