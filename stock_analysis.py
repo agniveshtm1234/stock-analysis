@@ -1,5 +1,6 @@
 import yfinance as yf
 import talib
+import csv
 import numpy as np
 from nsepython import *
 import pandas as pd
@@ -272,56 +273,77 @@ def main():
     elif option == "Latest Gainers":
         st.header("Analyze Latest Gainers")
         uploaded_file = st.file_uploader("Upload CSV File", type="csv")
+
         if uploaded_file and st.button("Analyze"):
-            with st.spinner("Analyzing..."):
-                df = pd.read_csv(uploaded_file)
-                headers = df.columns.tolist()
-                if 'SYMBOL' not in headers or 'CHNG' not in headers:
-                    st.error("CSV must contain 'SYMBOL' and 'CHNG' columns.")
-                else:
-                    stock_changes = []
-                    for _, row in df.iterrows():
-                        try:
-                            change_value = float(row['CHNG'])
-                            stock_changes.append((row['SYMBOL'], change_value))
-                        except ValueError:
-                            st.write(f"Skipping {row['SYMBOL']}: Invalid CHNG value '{row['CHNG']}'")
-                    
-                    filtered_stocks = [stock for stock, change in stock_changes if change >= 0]
-                    total = len(filtered_stocks)
-                    progress_bar = st.progress(0)
-                    results = []
-                    
-                    for i, stock in enumerate(filtered_stocks, 1):
-                        stock_ticker = stock + '.NS'
-                        result, msg = check_moving_average_conditions(stock_ticker)
+            # Read CSV file properly using StringIO
+            decoded_file = uploaded_file.getvalue().decode("utf-8").splitlines()
+            reader = csv.reader(decoded_file)
+            all_data = list(reader)
+
+            header = []
+            for row in all_data[:20]:
+                for item in row:
+                    clean_item = item.replace('"', '').replace('\ufeff', '').strip()
+                    if clean_item.startswith(","):
+                        clean_item = clean_item[1:].strip()
+                    if clean_item:
+                        header.append(clean_item)
+
+            stock_data1 = all_data[4:]
+            try:
+                symbol_idx = header.index("SYMBOL")
+                chng_idx = header.index("CHNG")
+            except ValueError:
+                st.error("CSV must contain 'SYMBOL' and 'CHNG' columns.")
+                st.stop()
+
+            stock_changes = []
+            for row in stock_data1:
+                if len(row) > max(symbol_idx, chng_idx):
+                    stock_name = row[symbol_idx].strip()
+                    try:
+                        change_value = float(row[chng_idx].strip())
+                    except ValueError:
+                        st.warning(f"Skipping {stock_name}: Invalid CHNG value '{row[chng_idx]}'")
+                        continue
+                    stock_changes.append((stock_name, change_value))
+
+            filtered_stocks = [stock for stock, change in stock_changes if change >= 0]
+            total = len(filtered_stocks)
+            progress_bar = st.progress(0)
+            results = []
+
+            for i, stock in enumerate(filtered_stocks, 1):
+                stock_ticker = stock + '.NS'
+                result, msg = check_moving_average_conditions(stock_ticker)
+                st.write(msg)
+                if result != False:
+                    stock_data, output = analyze_stock(stock_ticker)
+                    st.write(output)
+                    if stock_data and not isinstance(stock_data, str):
+                        results.append(stock_data)
+                progress_bar.progress(i / total)
+
+            if results:
+                df_results = pd.DataFrame(results, columns=names)
+                st.dataframe(df_results)
+                csv_content = df_results.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="Download CSV",
+                    data=csv_content,
+                    file_name="gainerstock.csv",
+                    mime="text/csv"
+                )
+
+                if st.checkbox("Send Email"):
+                    recipient = st.text_input("Recipient Email")
+                    sender = st.text_input("Your Email")
+                    password = st.text_input("App Password", type="password")
+                    if st.button("Send"):
+                        subject = f"Latest Gainers Analysis Report - {date}"
+                        body = f"Attached is the gainers analysis report generated on {date}."
+                        success, msg = send_email(subject, body, csv_content, recipient, sender, password)
                         st.write(msg)
-                        if result != False:
-                            stock_data, output = analyze_stock(stock_ticker)
-                            st.write(output)
-                            if stock_data and not isinstance(stock_data, str):
-                                results.append(stock_data)
-                        progress_bar.progress(i / total)
-                    
-                    if results:
-                        df_results = pd.DataFrame(results, columns=names)
-                        st.dataframe(df_results)
-                        csv_content = df_results.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="Download CSV",
-                            data=csv_content,
-                            file_name="gainerstock.csv",
-                            mime="text/csv"
-                        )
-                        if st.checkbox("Send Email"):
-                            recipient = st.text_input("Recipient Email")
-                            sender = st.text_input("Your Email")
-                            password = st.text_input("App Password", type="password")
-                            if st.button("Send"):
-                                subject = f"Latest Gainers Analysis Report - {date}"
-                                body = f"Attached is the gainers analysis report generated on {date}."
-                                success, msg = send_email(subject, body, csv_content, recipient, sender, password)
-                                st.write(msg)
 
     elif option == "Intraday Stocks":
         st.header("Analyze Intraday Stocks")
